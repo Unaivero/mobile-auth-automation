@@ -1,0 +1,494 @@
+trigger:
+  branches:
+    include:
+    - main
+    - develop
+    - feature/*
+  paths:
+    exclude:
+    - README.md
+    - docs/*
+
+pr:
+  branches:
+    include:
+    - main
+    - develop
+
+schedules:
+- cron: "0 0 * * *"
+  displayName: Daily midnight build
+  branches:
+    include:
+    - main
+
+variables:
+  MAVEN_CACHE_FOLDER: $(Pipeline.Workspace)/.m2/repository
+  ALLURE_VERSION: '2.20.1'
+  # Default BDD test tags to run
+  BDD_TAGS: 'not @wip and not @disabled'
+  # Security test configuration
+  SECURITY_TEST_LEVEL: 'standard' # Options: basic, standard, comprehensive
+
+stages:
+- stage: ChangeDetection
+  displayName: 'Detect Changed Files'
+  jobs:
+  - job: DetectChanges
+    displayName: 'Analyze Code Changes'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+      fetchDepth: 0
+
+    - task: Bash@3
+      displayName: 'Detect Changed Areas'
+      name: SetChangedVars
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Detect changed files
+          if [[ "$(Build.Reason)" == "PullRequest" ]]; then
+            CHANGED_FILES=$(git diff --name-only origin/$(System.PullRequest.TargetBranch) HEAD)
+          else
+            CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD)
+          fi
+          
+          # Check for changes in different areas
+          if echo "$CHANGED_FILES" | grep -q "pom.xml\|azure-pipelines.yml"; then
+            echo "##vso[task.setvariable variable=runAllTests;isOutput=true]true"
+          else
+            echo "##vso[task.setvariable variable=runAllTests;isOutput=true]false"
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "src/main/java/com/securitytests/utils/security/\|src/test/java/com/securitytests/security/\|src/test/resources/features/\|src/main/java/com/securitytests/steps/"; then
+            echo "##vso[task.setvariable variable=runSecurityTests;isOutput=true]true"
+            
+            # Check for specific feature changes to run selective BDD tests
+            if echo "$CHANGED_FILES" | grep -q "src/test/resources/features/authentication/"; then
+              echo "##vso[task.setvariable variable=runAuthBddTests;isOutput=true]true"
+              echo "##vso[task.setvariable variable=authBddTags;isOutput=true]@authentication and not @wip"
+            else
+              echo "##vso[task.setvariable variable=runAuthBddTests;isOutput=true]false"
+            fi
+            
+            if echo "$CHANGED_FILES" | grep -q "src/test/resources/features/security/"; then
+              echo "##vso[task.setvariable variable=runSecurityBddTests;isOutput=true]true"
+              echo "##vso[task.setvariable variable=securityBddTags;isOutput=true]@security and not @wip"
+            else
+              echo "##vso[task.setvariable variable=runSecurityBddTests;isOutput=true]false"
+            fi
+          else
+            echo "##vso[task.setvariable variable=runSecurityTests;isOutput=true]false"
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "src/main/java/com/securitytests/api/\|src/test/java/com/securitytests/api/"; then
+            echo "##vso[task.setvariable variable=runApiTests;isOutput=true]true"
+          else
+            echo "##vso[task.setvariable variable=runApiTests;isOutput=true]false"
+          fi
+          
+          if echo "$CHANGED_FILES" | grep -q "src/main/java/com/securitytests/pages/\|src/test/java/com/securitytests/ui/"; then
+            echo "##vso[task.setvariable variable=runUiTests;isOutput=true]true"
+          else
+            echo "##vso[task.setvariable variable=runUiTests;isOutput=true]false"
+          fi
+          
+          # Create a list of changed test files for selective test running
+          CHANGED_TESTS=$(echo "$CHANGED_FILES" | grep "src/test/java/.*/.*Test.java" || echo "")
+          if [[ ! -z "$CHANGED_TESTS" ]]; then
+            CHANGED_TEST_CLASSES=$(echo "$CHANGED_TESTS" | sed 's/src\/test\/java\///' | sed 's/\.java$//' | sed 's/\//./g')
+            echo "##vso[task.setvariable variable=changedTestClasses;isOutput=true]$CHANGED_TEST_CLASSES"
+          fi
+          
+          # Output for diagnostic purposes
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+- stage: APITests
+  displayName: 'Run API Tests'
+  dependsOn: ChangeDetection
+  condition: or(eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runAllTests'], 'true'), eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runApiTests'], 'true'))
+  jobs:
+  - job: RunAPITests
+    displayName: 'Execute API Tests'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+      displayName: 'Cache Maven packages'
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Set up JDK 11'
+
+    - task: Maven@3
+      displayName: 'Run API Tests'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'clean test'
+        options: '-DskipUiTests=true -DskipSecurityTests=true -Dgroups=api'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenOptions: '-Xmx3072m'
+      env:
+        TEST_API_KEY: $(TEST_API_KEY)
+        API_BASE_URL: $(API_BASE_URL)
+
+    - task: Bash@3
+      displayName: 'Generate Allure Report'
+      inputs:
+        targetType: 'inline'
+        script: |
+          wget https://github.com/allure-framework/allure2/releases/download/$(ALLURE_VERSION)/allure-$(ALLURE_VERSION).zip
+          unzip allure-$(ALLURE_VERSION).zip -d .
+          ./allure-$(ALLURE_VERSION)/bin/allure generate target/allure-results -o $(Build.ArtifactStagingDirectory)/allure-report
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish API Test Reports'
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/allure-report'
+        artifactName: 'api-test-report'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+- stage: SecurityTests
+  displayName: 'Run Security Tests'
+  dependsOn: ChangeDetection
+  condition: or(eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runAllTests'], 'true'), eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runSecurityTests'], 'true'), and(succeeded(), ne(variables['Build.Reason'], 'Schedule')))
+  jobs:
+  - job: RunSecurityTests
+    displayName: 'Execute Security Tests'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+      displayName: 'Cache Maven packages'
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Set up JDK 11'
+
+    - task: Bash@3
+      displayName: 'Start OWASP ZAP'
+      inputs:
+        targetType: 'inline'
+        script: |
+          docker pull owasp/zap2docker-stable
+          docker run -d --name zap -p 8080:8080 -p 8090:8090 -i owasp/zap2docker-stable zap-x.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=$(ZAP_API_KEY)
+          echo "Waiting for ZAP to start..."
+          sleep 30
+
+    - task: Maven@3
+      displayName: 'Run Security Tests'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'clean test'
+        options: '-DskipUiTests=true -Dgroups=security -Dzap.host=localhost -Dzap.port=8080 -Dzap.apiKey=$(ZAP_API_KEY)'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenOptions: '-Xmx3072m'
+      env:
+        TEST_API_KEY: $(TEST_API_KEY)
+        API_BASE_URL: $(API_BASE_URL)
+
+    - task: Bash@3
+      displayName: 'Generate Allure Report'
+      inputs:
+        targetType: 'inline'
+        script: |
+          wget https://github.com/allure-framework/allure2/releases/download/$(ALLURE_VERSION)/allure-$(ALLURE_VERSION).zip
+          unzip allure-$(ALLURE_VERSION).zip -d .
+          ./allure-$(ALLURE_VERSION)/bin/allure generate target/allure-results -o $(Build.ArtifactStagingDirectory)/allure-report
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Security Test Reports'
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/allure-report'
+        artifactName: 'security-test-report'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish ZAP Security Report'
+      inputs:
+        pathtoPublish: 'target/zap-security-report.html'
+        artifactName: 'zap-security-report'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+- stage: BDDSecurityTests
+  displayName: 'Run BDD Security Tests'
+  dependsOn: ChangeDetection
+  condition: or(eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runAllTests'], 'true'), eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runSecurityBddTests'], 'true'))
+  jobs:
+  - job: RunBDDSecurityTests
+    displayName: 'Execute BDD Security Tests'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+      displayName: 'Cache Maven packages'
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Set up JDK 11'
+      
+    - task: Bash@3
+      displayName: 'Prepare Security Test Config'
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Create security test properties file
+          cat > src/test/resources/security-test.properties << EOF
+          # Security Test Configuration
+          api.baseUrl=$(API_BASE_URL)
+          api.timeout=30000
+          zap.enabled=$(ZAP_ENABLED)
+          zap.proxyUrl=http://localhost:8080
+          zap.apiKey=$(ZAP_API_KEY)
+          security.owaspLevel=$(OWASP_LEVEL)
+          security.sessionTimeout=30
+          security.accountLockoutThreshold=5
+          security.maxPasswordAgeDays=90
+          security.scanEnabled=true
+          security.requiredHeaders=Strict-Transport-Security,X-Content-Type-Options,X-XSS-Protection,Content-Security-Policy
+          EOF
+          
+          # Create test environment specific config
+          cat > src/test/resources/security-test-$(TEST_ENVIRONMENT).properties << EOF
+          # Environment Specific Configuration for $(TEST_ENVIRONMENT)
+          # Override values from security-test.properties
+          EOF
+      env:
+        API_BASE_URL: $(API_BASE_URL)
+        ZAP_ENABLED: $(ZAP_ENABLED)
+        ZAP_API_KEY: $(ZAP_API_KEY)
+        OWASP_LEVEL: $(OWASP_LEVEL)
+        TEST_ENVIRONMENT: $(TEST_ENVIRONMENT)
+
+    - task: Bash@3
+      displayName: 'Start ZAP if enabled'
+      inputs:
+        targetType: 'inline'
+        script: |
+          if [[ "$(ZAP_ENABLED)" == "true" ]]; then
+            docker pull owasp/zap2docker-stable
+            docker run -d --name zap -p 8080:8080 -p 8090:8090 -i owasp/zap2docker-stable zap-x.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=$(ZAP_API_KEY)
+            echo "Waiting for ZAP to start..."
+            sleep 30
+          else
+            echo "ZAP integration disabled. Skipping ZAP startup."
+          fi
+
+    # Run BDD tests with TestNG and Cucumber
+    - task: Maven@3
+      displayName: 'Run BDD Security Tests'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'clean test'
+        options: '-Dcucumber.filter.tags="$(BDD_TAGS) and @security" -Dtest=BDDTestRunner'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenOptions: '-Xmx3072m'
+      env:
+        TEST_API_KEY: $(TEST_API_KEY)
+        API_BASE_URL: $(API_BASE_URL)
+        SECURITY_TEST_LEVEL: $(SECURITY_TEST_LEVEL)
+
+    - task: Bash@3
+      displayName: 'Generate Living Documentation'
+      inputs:
+        targetType: 'inline'
+        script: |
+          # Generate Living Documentation from Feature Files
+          java -cp target/classes:target/test-classes com.securitytests.utils.documentation.LivingDocumentationGenerator \
+            --featureDir src/test/resources/features \
+            --outputDir $(Build.ArtifactStagingDirectory)/living-docs \
+            --filters security,authentication \
+            --projectName "Mobile Auth Security Testing" \
+            --buildId $(Build.BuildId) \
+            --buildName $(Build.DefinitionName)
+          
+          # Copy allure results
+          mkdir -p $(Build.ArtifactStagingDirectory)/allure-report
+          cp -r target/allure-results/* $(Build.ArtifactStagingDirectory)/allure-report/ || echo "No Allure results found"
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish Living Documentation'
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/living-docs'
+        artifactName: 'living-documentation'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish BDD Test Reports'
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/allure-report'
+        artifactName: 'bdd-test-report'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+- stage: UITests
+  displayName: 'Run UI Tests'
+  dependsOn: ChangeDetection
+  condition: or(eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runAllTests'], 'true'), eq(dependencies.ChangeDetection.outputs['DetectChanges.SetChangedVars.runUiTests'], 'true'))
+  jobs:
+  - job: RunAndroidTests
+    displayName: 'Execute Android UI Tests'
+    pool:
+      vmImage: 'macOS-latest'
+    steps:
+    - checkout: self
+
+    - task: Cache@2
+      inputs:
+        key: 'maven | "$(Agent.OS)" | **/pom.xml'
+        restoreKeys: |
+          maven | "$(Agent.OS)"
+        path: $(MAVEN_CACHE_FOLDER)
+      displayName: 'Cache Maven packages'
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Set up JDK 11'
+
+    - task: NodeTool@0
+      inputs:
+        versionSpec: '16.x'
+      displayName: 'Install Node.js'
+
+    - task: Bash@3
+      displayName: 'Setup Appium'
+      inputs:
+        targetType: 'inline'
+        script: |
+          npm install -g appium
+          appium driver install uiautomator2
+          appium &
+          echo "Waiting for Appium to start..."
+          sleep 5
+
+    - task: Bash@3
+      displayName: 'Setup Android Emulator'
+      inputs:
+        targetType: 'inline'
+        script: |
+          echo "y" | $ANDROID_HOME/tools/bin/sdkmanager --install 'system-images;android-30;google_apis;x86_64'
+          echo "no" | $ANDROID_HOME/tools/bin/avdmanager create avd -n test_device -k 'system-images;android-30;google_apis;x86_64' --force
+          $ANDROID_HOME/emulator/emulator -avd test_device -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim &
+          $ANDROID_HOME/platform-tools/adb wait-for-device shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done;'
+          echo "Emulator started"
+
+    - task: Maven@3
+      displayName: 'Run Android UI Tests'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'clean test'
+        options: '-DskipApiTests=true -DskipSecurityTests=true -Dgroups=ui -Dplatform=android'
+        publishJUnitResults: true
+        testResultsFiles: '**/surefire-reports/TEST-*.xml'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenOptions: '-Xmx3072m'
+      env:
+        TEST_API_KEY: $(TEST_API_KEY)
+        API_BASE_URL: $(API_BASE_URL)
+
+    - task: Bash@3
+      displayName: 'Generate Allure Report'
+      inputs:
+        targetType: 'inline'
+        script: |
+          wget https://github.com/allure-framework/allure2/releases/download/$(ALLURE_VERSION)/allure-$(ALLURE_VERSION).zip
+          unzip allure-$(ALLURE_VERSION).zip -d .
+          ./allure-$(ALLURE_VERSION)/bin/allure generate target/allure-results -o $(Build.ArtifactStagingDirectory)/allure-report
+
+    - task: PublishBuildArtifacts@1
+      displayName: 'Publish UI Test Reports'
+      inputs:
+        pathtoPublish: '$(Build.ArtifactStagingDirectory)/allure-report'
+        artifactName: 'ui-test-report'
+        publishLocation: 'Container'
+      condition: succeededOrFailed()
+
+- stage: NotifyResults
+  displayName: 'Notify Results'
+  dependsOn:
+  - APITests
+  - SecurityTests
+  - UITests
+  condition: succeededOrFailed()
+  jobs:
+  - job: SendNotifications
+    displayName: 'Send Test Notifications'
+    pool:
+      vmImage: 'ubuntu-latest'
+    steps:
+    - checkout: self
+
+    - task: JavaToolInstaller@0
+      inputs:
+        versionSpec: '11'
+        jdkArchitectureOption: 'x64'
+        jdkSourceOption: 'PreInstalled'
+      displayName: 'Set up JDK 11'
+
+    - task: Maven@3
+      displayName: 'Send Notifications'
+      inputs:
+        mavenPomFile: 'pom.xml'
+        goals: 'exec:java'
+        options: '-Dexec.mainClass="com.securitytests.utils.notification.NotificationSender" -Dexec.args="--subject ''Test Execution Results'' --body ''Test execution on Azure DevOps completed. See results at $(System.TeamFoundationCollectionUri)$(System.TeamProject)/_build/results?buildId=$(Build.BuildId)'' --priority HIGH"'
+        javaHomeOption: 'JDKVersion'
+        mavenVersionOption: 'Default'
+        mavenOptions: '-Xmx1024m'
+      env:
+        NOTIFICATION_EMAIL_RECIPIENTS: $(NOTIFICATION_EMAIL_RECIPIENTS)
+        NOTIFICATION_SLACK_WEBHOOK: $(NOTIFICATION_SLACK_WEBHOOK)
+        NOTIFICATION_TEAMS_WEBHOOK: $(NOTIFICATION_TEAMS_WEBHOOK)
+        SMTP_HOST: $(SMTP_HOST)
+        SMTP_PORT: $(SMTP_PORT)
+        SMTP_USERNAME: $(SMTP_USERNAME)
+        SMTP_PASSWORD: $(SMTP_PASSWORD)

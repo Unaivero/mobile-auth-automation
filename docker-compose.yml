@@ -1,0 +1,232 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database for Test Data Management
+  postgres-db:
+    image: postgres:15-alpine
+    container_name: mobile-auth-db
+    environment:
+      POSTGRES_DB: mobile_auth_testing
+      POSTGRES_USER: test_user
+      POSTGRES_PASSWORD: test_password
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./docker/db-init:/docker-entrypoint-initdb.d
+    networks:
+      - mobile-test-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U test_user -d mobile_auth_testing"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for Session Management and Caching
+  redis:
+    image: redis:7-alpine
+    container_name: mobile-auth-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - mobile-test-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+
+  # OWASP ZAP Security Scanner
+  zap:
+    image: owasp/zap2docker-stable
+    container_name: mobile-auth-zap
+    ports:
+      - "8080:8080"
+      - "8090:8090"
+    command: zap-x.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=mobile-auth-zap-key
+    networks:
+      - mobile-test-network
+    volumes:
+      - zap_data:/zap/wrk
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Appium Server
+  appium-server:
+    build:
+      context: ./docker/appium
+      dockerfile: Dockerfile
+    container_name: mobile-auth-appium
+    ports:
+      - "4723:4723"
+      - "5037:5037"  # ADB port
+    privileged: true
+    volumes:
+      - /dev/bus/usb:/dev/bus/usb
+      - android_sdk:/opt/android
+      - appium_logs:/var/log/appium
+    networks:
+      - mobile-test-network
+    environment:
+      - ANDROID_HOME=/opt/android
+      - JAVA_HOME=/usr/lib/jvm/java-11-openjdk-amd64
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4723/wd/hub/status"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Mock API Server for Authentication
+  mock-api:
+    build:
+      context: ./docker/mock-api
+      dockerfile: Dockerfile
+    container_name: mobile-auth-mock-api
+    ports:
+      - "8081:8081"
+    networks:
+      - mobile-test-network
+    environment:
+      - DB_HOST=postgres-db
+      - DB_NAME=mobile_auth_testing
+      - DB_USER=test_user
+      - DB_PASS=test_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8081/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+
+  # Test Execution Container
+  test-runner:
+    build:
+      context: .
+      dockerfile: docker/test-runner/Dockerfile
+    container_name: mobile-auth-test-runner
+    volumes:
+      - .:/workspace
+      - maven_cache:/root/.m2
+      - test_reports:/workspace/target
+      - appium_logs:/var/log/appium
+    networks:
+      - mobile-test-network
+    environment:
+      - APPIUM_SERVER_URL=http://appium-server:4723
+      - ZAP_HOST=zap
+      - ZAP_PORT=8080
+      - ZAP_API_KEY=mobile-auth-zap-key
+      - DB_HOST=postgres-db
+      - DB_NAME=mobile_auth_testing
+      - DB_USER=test_user
+      - DB_PASSWORD=test_password
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - MOCK_API_URL=http://mock-api:8081
+    depends_on:
+      appium-server:
+        condition: service_healthy
+      postgres-db:
+        condition: service_healthy
+      zap:
+        condition: service_healthy
+      mock-api:
+        condition: service_healthy
+    command: tail -f /dev/null  # Keep container running for manual test execution
+
+  # Android Emulator (for headless testing)
+  android-emulator:
+    build:
+      context: ./docker/android-emulator
+      dockerfile: Dockerfile
+    container_name: mobile-auth-android-emulator
+    privileged: true
+    ports:
+      - "5554:5554"
+      - "5555:5555"
+    volumes:
+      - android_sdk:/opt/android
+      - emulator_data:/root/.android
+    networks:
+      - mobile-test-network
+    environment:
+      - DISPLAY=:99
+      - ANDROID_HOME=/opt/android
+      - ADB_SERVER_SOCKET=tcp:0.0.0.0:5037
+    command: /start_emulator.sh
+    healthcheck:
+      test: ["CMD-SHELL", "adb devices | grep emulator"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+
+  # Grafana for Advanced Reporting
+  grafana:
+    image: grafana/grafana:latest
+    container_name: mobile-auth-grafana
+    ports:
+      - "3000:3000"
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ./docker/grafana/provisioning:/etc/grafana/provisioning
+      - ./docker/grafana/dashboards:/var/lib/grafana/dashboards
+    networks:
+      - mobile-test-network
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+      - GF_DATABASE_TYPE=postgres
+      - GF_DATABASE_HOST=postgres-db:5432
+      - GF_DATABASE_NAME=mobile_auth_testing
+      - GF_DATABASE_USER=test_user
+      - GF_DATABASE_PASSWORD=test_password
+    depends_on:
+      postgres-db:
+        condition: service_healthy
+
+  # InfluxDB for Time Series Data
+  influxdb:
+    image: influxdb:2.0
+    container_name: mobile-auth-influxdb
+    ports:
+      - "8086:8086"
+    volumes:
+      - influxdb_data:/var/lib/influxdb2
+    networks:
+      - mobile-test-network
+    environment:
+      - INFLUXDB_DB=mobile_auth_metrics
+      - INFLUXDB_ADMIN_USER=admin
+      - INFLUXDB_ADMIN_PASSWORD=adminpassword
+      - INFLUXDB_USER=test_user
+      - INFLUXDB_USER_PASSWORD=test_password
+
+networks:
+  mobile-test-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+volumes:
+  postgres_data:
+  redis_data:
+  zap_data:
+  android_sdk:
+  appium_logs:
+  maven_cache:
+  test_reports:
+  emulator_data:
+  grafana_data:
+  influxdb_data:

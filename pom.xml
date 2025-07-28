@@ -1,0 +1,419 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 http://maven.apache.org/xsd/maven-4.0.0.xsd">
+    <modelVersion>4.0.0</modelVersion>
+
+    <groupId>com.securitytests</groupId>
+    <artifactId>mobile-auth-automation</artifactId>
+    <version>1.0-SNAPSHOT</version>
+
+    <properties>
+        <maven.compiler.source>11</maven.compiler.source>
+        <maven.compiler.target>11</maven.compiler.target>
+        <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <appium.version>8.5.1</appium.version>
+        <testng.version>7.7.1</testng.version>
+        <allure.version>2.22.1</allure.version>
+        <aspectj.version>1.9.19</aspectj.version>
+        <mailslurp.version>11.6.3</mailslurp.version>
+        <slf4j.version>2.0.7</slf4j.version>
+        <mockserver.version>5.15.0</mockserver.version>
+        <cucumber.version>7.14.0</cucumber.version>
+        <ashot.version>1.5.4</ashot.version>
+        <zaproxy.version>2.12.0</zaproxy.version>
+        <owasp.encoder.version>1.2.3</owasp.encoder.version>
+        <owasp.java.encoder.version>1.2.3</owasp.java-encoder.version>
+        <postgresql.version>42.6.0</postgresql.version>
+        <hikari.version>5.0.1</hikari.version>
+        <redis.version>4.4.3</redis.version>
+        <influxdb.version>2.23</influxdb.version>
+    </properties>
+
+    <dependencies>
+        <!-- Appium Java Client -->
+        <dependency>
+            <groupId>io.appium</groupId>
+            <artifactId>java-client</artifactId>
+            <version>${appium.version}</version>
+        </dependency>
+
+        <!-- TestNG -->
+        <dependency>
+            <groupId>org.testng</groupId>
+            <artifactId>testng</artifactId>
+            <version>${testng.version}</version>
+        </dependency>
+
+        <!-- Allure Reporting -->
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-testng</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+
+        <!-- MailSlurp Client -->
+        <dependency>
+            <groupId>com.mailslurp</groupId>
+            <artifactId>mailslurp-client-java</artifactId>
+            <version>${mailslurp.version}</version>
+        </dependency>
+
+        <!-- Logging -->
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-simple</artifactId>
+            <version>${slf4j.version}</version>
+        </dependency>
+
+        <!-- Mock Server for simulating backend -->
+        <dependency>
+            <groupId>org.mock-server</groupId>
+            <artifactId>mockserver-netty</artifactId>
+            <version>${mockserver.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <!-- JSON Processing -->
+        <dependency>
+            <groupId>org.json</groupId>
+            <artifactId>json</artifactId>
+            <version>20230618</version>
+        </dependency>
+
+        <!-- Apache Commons -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
+            <version>3.12.0</version>
+        </dependency>
+        
+        <!-- Cucumber Dependencies -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-java</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-testng</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-picocontainer</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        
+        <!-- Allure Cucumber Integration -->
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-cucumber7-jvm</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+        
+        <!-- Visual Validation -->
+        <dependency>
+            <groupId>ru.yandex.qatools.ashot</groupId>
+            <artifactId>ashot</artifactId>
+            <version>${ashot.version}</version>
+        </dependency>
+        
+        <!-- BrowserStack Integration -->
+        <dependency>
+            <groupId>com.browserstack</groupId>
+            <artifactId>browserstack-java-sdk</artifactId>
+            <version>1.5.2</version>
+        </dependency>
+        
+        <!-- Test Data Generation Strategy -->
+        <dependency>
+            <groupId>com.github.javafaker</groupId>
+            <artifactId>javafaker</artifactId>
+            <version>1.0.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi</artifactId>
+            <version>5.2.3</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.7.1</version>
+        </dependency>
+        <dependency>
+            <groupId>com.fasterxml.jackson.core</groupId>
+            <artifactId>jackson-databind</artifactId>
+            <version>2.15.2</version>
+        </dependency>
+        
+        <!-- Database Dependencies -->
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>${postgresql.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.zaxxer</groupId>
+            <artifactId>HikariCP</artifactId>
+            <version>${hikari.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>redis.clients</groupId>
+            <artifactId>jedis</artifactId>
+            <version>${redis.version}</version>
+        </dependency>
+        
+        <!-- InfluxDB for Time Series Data -->
+        <dependency>
+            <groupId>com.influxdb</groupId>
+            <artifactId>influxdb-client-java</artifactId>
+            <version>${influxdb.version}</version>
+        </dependency>
+        
+        <!-- Advanced Reporting Dependencies -->
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-math3</artifactId>
+            <version>3.6.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jfree</groupId>
+            <artifactId>jfreechart</artifactId>
+            <version>1.5.3</version>
+        </dependency>
+        <dependency>
+            <groupId>com.opencsv</groupId>
+            <artifactId>opencsv</artifactId>
+            <version>5.7.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>2.0.29</version>
+        </dependency>
+
+        <!-- Security Testing Dependencies -->
+        <dependency>
+            <groupId>org.zaproxy</groupId>
+            <artifactId>zap-clientapi</artifactId>
+            <version>${zaproxy.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.owasp.encoder</groupId>
+            <artifactId>encoder</artifactId>
+            <version>${owasp.encoder.version}</version>
+        </dependency>
+        
+        <!-- Cucumber Dependencies for BDD Security Testing -->
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-java</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-testng</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.cucumber</groupId>
+            <artifactId>cucumber-core</artifactId>
+            <version>${cucumber.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>io.qameta.allure</groupId>
+            <artifactId>allure-cucumber6-jvm</artifactId>
+            <version>${allure.version}</version>
+        </dependency>
+    </dependencies>
+
+    <!-- Profiles for different security test configurations -->
+    <profiles>
+        <profile>
+            <id>security-tests</id>
+            <activation>
+                <property>
+                    <name>security</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <suiteXmlFiles>
+                                <suiteXmlFile>src/test/resources/testng/security-tests.xml</suiteXmlFile>
+                            </suiteXmlFiles>
+                            <systemPropertyVariables>
+                                <testEnvironment>${TEST_ENVIRONMENT}</testEnvironment>
+                                <securityTestLevel>${SECURITY_TEST_LEVEL}</securityTestLevel>
+                                <zapEnabled>${ZAP_ENABLED}</zapEnabled>
+                                <BDD_TAGS>${BDD_TAGS}</BDD_TAGS>
+                            </systemPropertyVariables>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+        
+        <profile>
+            <id>dev-security</id>
+            <activation>
+                <activeByDefault>true</activeByDefault>
+            </activation>
+            <properties>
+                <TEST_ENVIRONMENT>dev</TEST_ENVIRONMENT>
+                <SECURITY_TEST_LEVEL>2</SECURITY_TEST_LEVEL>
+                <ZAP_ENABLED>false</ZAP_ENABLED>
+                <BDD_TAGS>@security</BDD_TAGS>
+            </properties>
+        </profile>
+        
+        <profile>
+            <id>ci-security</id>
+            <properties>
+                <TEST_ENVIRONMENT>ci</TEST_ENVIRONMENT>
+                <SECURITY_TEST_LEVEL>3</SECURITY_TEST_LEVEL>
+                <ZAP_ENABLED>true</ZAP_ENABLED>
+                <BDD_TAGS>@security</BDD_TAGS>
+            </properties>
+        </profile>
+        
+        <profile>
+            <id>critical-security</id>
+            <properties>
+                <TEST_ENVIRONMENT>ci</TEST_ENVIRONMENT>
+                <SECURITY_TEST_LEVEL>3</SECURITY_TEST_LEVEL>
+                <ZAP_ENABLED>true</ZAP_ENABLED>
+                <BDD_TAGS>@security and @severity-critical</BDD_TAGS>
+            </properties>
+        </profile>
+    </profiles>
+    
+    <build>
+        <plugins>
+            <!-- Maven Compiler Plugin -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.11.0</version>
+                <configuration>
+                    <source>${maven.compiler.source}</source>
+                    <target>${maven.compiler.target}</target>
+                </configuration>
+            </plugin>
+            
+            <!-- Maven Surefire Plugin for TestNG -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.1.2</version>
+                <configuration>
+                    <suiteXmlFiles>
+                        <suiteXmlFile>src/test/resources/testng.xml</suiteXmlFile>
+                    </suiteXmlFiles>
+                    <argLine>
+                        -javaagent:"${settings.localRepository}/org/aspectj/aspectjweaver/${aspectj.version}/aspectjweaver-${aspectj.version}.jar"
+                    </argLine>
+                </configuration>
+                <dependencies>
+                    <dependency>
+                        <groupId>org.aspectj</groupId>
+                        <artifactId>aspectjweaver</artifactId>
+                        <version>${aspectj.version}</version>
+                    </dependency>
+                </dependencies>
+            </plugin>
+            
+            <!-- Allure Maven Plugin -->
+            <plugin>
+                <groupId>io.qameta.allure</groupId>
+                <artifactId>allure-maven</artifactId>
+                <version>2.12.0</version>
+                <configuration>
+                    <reportVersion>${allure.version}</reportVersion>
+                </configuration>
+            </plugin>
+            
+            <!-- Maven Resources Plugin for copying feature files to target directory -->
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-resources-plugin</artifactId>
+                <version>3.3.1</version>
+                <executions>
+                    <execution>
+                        <id>copy-resources</id>
+                        <phase>validate</phase>
+                        <goals>
+                            <goal>copy-resources</goal>
+                        </goals>
+                        <configuration>
+                            <outputDirectory>${project.build.directory}/classes/features</outputDirectory>
+                            <resources>
+                                <resource>
+                                    <directory>src/test/resources/features</directory>
+                                    <filtering>true</filtering>
+                                </resource>
+                            </resources>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+            
+            <!-- Docker plugin for ZAP container management if needed -->
+            <plugin>
+                <groupId>org.codehaus.mojo</groupId>
+                <artifactId>exec-maven-plugin</artifactId>
+                <version>3.1.0</version>
+                <executions>
+                    <execution>
+                        <id>start-zap</id>
+                        <phase>pre-integration-test</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>sh</executable>
+                            <arguments>
+                                <argument>-c</argument>
+                                <argument>if [ "${ZAP_ENABLED}" = "true" ]; then 
+                                    if [ ! "$(docker ps -q -f name=zap)" ]; then 
+                                        docker run -d --name zap -p 8080:8080 -p 8090:8090 -i owasp/zap2docker-stable zap.sh -daemon -host 0.0.0.0 -port 8080 -config api.key=${ZAP_API_KEY}; 
+                                        sleep 10; 
+                                    fi; 
+                                fi</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                    <execution>
+                        <id>stop-zap</id>
+                        <phase>post-integration-test</phase>
+                        <goals>
+                            <goal>exec</goal>
+                        </goals>
+                        <configuration>
+                            <executable>sh</executable>
+                            <arguments>
+                                <argument>-c</argument>
+                                <argument>if [ "${ZAP_ENABLED}" = "true" ] && [ "${KEEP_ZAP}" != "true" ]; then docker stop zap; docker rm zap; fi</argument>
+                            </arguments>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+        </plugins>
+    </build>
+</project>

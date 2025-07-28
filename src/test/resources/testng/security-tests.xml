@@ -1,0 +1,19 @@
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd" >
+<suite name="MobileAuthSecurityTests" verbose="1" parallel="false">
+    <parameter name="testEnvironment" value="${TEST_ENVIRONMENT:dev}"/>
+    
+    <!-- Listeners for reporting and configuration -->
+    <listeners>
+        <listener class-name="io.qameta.allure.testng.AllureTestNg"/>
+    </listeners>
+
+    <!-- Security tests using BDD -->
+    <test name="BDDSecurityTests">
+        <parameter name="cucumberTags" value="${BDD_TAGS:@security}"/>
+        <parameter name="securityTestLevel" value="${SECURITY_TEST_LEVEL:2}"/>
+        <parameter name="zapEnabled" value="${ZAP_ENABLED:false}"/>
+        <classes>
+            <class name="com.securitytests.runners.BDDSecurityTestRunner"/>
+        </classes>
+    </test>
+</suite>

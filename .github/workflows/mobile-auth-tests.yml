@@ -1,0 +1,252 @@
+name: Mobile Auth Tests
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  schedule:
+    - cron: '0 0 * * *'  # Run daily at midnight
+  workflow_dispatch:  # Allows manual triggering
+
+env:
+  ALLURE_VERSION: 2.20.1
+  TEST_RETRY_COUNT: 2
+  FORCE_COLOR: 1
+  # Add your environment-specific variables here
+  API_BASE_URL: ${{ secrets.API_BASE_URL }}
+
+jobs:
+  detect-changes:
+    name: Detect Changed Files
+    runs-on: ubuntu-latest
+    outputs:
+      changed_tests: ${{ steps.filter.outputs.changed_tests }}
+      changed_utils: ${{ steps.filter.outputs.changed_utils }}
+      changed_api: ${{ steps.filter.outputs.changed_api }}
+      changed_ui: ${{ steps.filter.outputs.changed_ui }}
+      changed_security: ${{ steps.filter.outputs.changed_security }}
+      run_all_tests: ${{ steps.filter.outputs.run_all_tests }}
+      
+    steps:
+      - uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetches all history for change detection
+      
+      - name: Check for changed files
+        id: filter
+        uses: dorny/paths-filter@v2
+        with:
+          base: ${{ github.ref == 'refs/heads/main' && 'HEAD~1' || 'origin/main' }}
+          filters: |
+            changed_tests:
+              - 'src/test/**/*.java'
+            changed_utils:
+              - 'src/main/java/com/securitytests/utils/**/*.java'
+            changed_api:
+              - 'src/main/java/com/securitytests/api/**/*.java'
+              - 'src/test/java/com/securitytests/api/**/*.java'
+            changed_ui:
+              - 'src/main/java/com/securitytests/pages/**/*.java'
+              - 'src/test/java/com/securitytests/ui/**/*.java'
+            changed_security:
+              - 'src/main/java/com/securitytests/utils/security/**/*.java'
+              - 'src/test/java/com/securitytests/security/**/*.java'
+            run_all_tests:
+              - 'pom.xml'
+              - '.github/workflows/mobile-auth-tests.yml'
+
+  functional-tests:
+    name: Run Functional Tests
+    needs: detect-changes
+    runs-on: macos-latest
+    if: ${{ needs.detect-changes.outputs.run_all_tests == 'true' || needs.detect-changes.outputs.changed_tests == 'true' || needs.detect-changes.outputs.changed_utils == 'true' || needs.detect-changes.outputs.changed_ui == 'true' }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+          cache: maven
+      
+      - name: Set up Node.js (for Appium)
+        uses: actions/setup-node@v3
+        with:
+          node-version: '16'
+      
+      - name: Install and Start Appium Server
+        run: |
+          npm install -g appium
+          appium driver install uiautomator2
+          appium driver install xcuitest
+          appium &
+          echo "Waiting for Appium to start..."
+          sleep 5
+          
+      - name: Run Android Emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 30
+          script: echo "Android emulator is ready"
+          
+      - name: Set up iOS Simulator
+        run: |
+          xcrun simctl list
+          xcrun simctl create test-device "iPhone 12" com.apple.CoreSimulator.SimRuntime.iOS-15-0
+          xcrun simctl boot test-device
+      
+      - name: Run TestNG Tests (Dynamic Selection)
+        run: |
+          if [[ "${{ needs.detect-changes.outputs.run_all_tests }}" == "true" ]]; then
+            echo "Running all functional tests"
+            mvn clean test -DskipSecurityTests=true -Dplatform=android
+          else
+            echo "Running tests based on changed files"
+            CHANGED_CLASSES=$(git diff --name-only ${{ github.event.before }} ${{ github.sha }} | grep 'src/test/java.*Test\.java' | sed 's/^src\/test\/java\///' | sed 's/\.java$//' | sed 's/\//./g')
+            if [[ -z "$CHANGED_CLASSES" ]]; then
+              echo "No test classes changed, running UI tests only"
+              mvn clean test -DskipSecurityTests=true -Dgroups=ui -Dplatform=android
+            else
+              echo "Running changed test classes: $CHANGED_CLASSES"
+              mvn clean test -DskipSecurityTests=true -Dplatform=android -Dtest=$CHANGED_CLASSES
+            fi
+          fi
+        env:
+          TEST_API_KEY: ${{ secrets.TEST_API_KEY }}
+          TEST_USERNAME: ${{ secrets.TEST_USERNAME }}
+          TEST_PASSWORD: ${{ secrets.TEST_PASSWORD }}
+      
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.zip
+          unzip allure-${{ env.ALLURE_VERSION }}.zip
+          ./allure-${{ env.ALLURE_VERSION }}/bin/allure generate target/allure-results -o target/allure-report
+      
+      - name: Publish Test Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports-functional
+          path: target/allure-report
+
+  api-tests:
+    name: Run API Tests
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: ${{ needs.detect-changes.outputs.run_all_tests == 'true' || needs.detect-changes.outputs.changed_api == 'true' || needs.detect-changes.outputs.changed_utils == 'true' }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+          cache: maven
+      
+      - name: Run API Tests
+        run: mvn clean test -DskipUiTests=true -DskipSecurityTests=true -Dgroups=api
+        env:
+          TEST_API_KEY: ${{ secrets.TEST_API_KEY }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.zip
+          unzip allure-${{ env.ALLURE_VERSION }}.zip
+          ./allure-${{ env.ALLURE_VERSION }}/bin/allure generate target/allure-results -o target/allure-report
+      
+      - name: Publish Test Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports-api
+          path: target/allure-report
+
+  security-tests:
+    name: Run Security Tests
+    needs: detect-changes
+    runs-on: ubuntu-latest
+    if: ${{ needs.detect-changes.outputs.run_all_tests == 'true' || needs.detect-changes.outputs.changed_security == 'true' }}
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+          cache: maven
+      
+      - name: Set up OWASP ZAP
+        run: |
+          docker pull owasp/zap2docker-stable
+          docker run -d --name zap -p 8080:8080 -p 8090:8090 -i owasp/zap2docker-stable zap-x.sh -daemon -host 0.0.0.0 -port 8080 -config api.addrs.addr.name=.* -config api.addrs.addr.regex=true -config api.key=${{ secrets.ZAP_API_KEY }}
+          echo "Waiting for ZAP to start..."
+          sleep 30
+      
+      - name: Run Security Tests
+        run: mvn clean test -DskipUiTests=true -Dgroups=security -Dzap.host=localhost -Dzap.port=8080 -Dzap.apiKey=${{ secrets.ZAP_API_KEY }}
+        env:
+          TEST_API_KEY: ${{ secrets.TEST_API_KEY }}
+          API_BASE_URL: ${{ secrets.API_BASE_URL }}
+      
+      - name: Generate Allure Report
+        if: always()
+        run: |
+          wget https://github.com/allure-framework/allure2/releases/download/${{ env.ALLURE_VERSION }}/allure-${{ env.ALLURE_VERSION }}.zip
+          unzip allure-${{ env.ALLURE_VERSION }}.zip
+          ./allure-${{ env.ALLURE_VERSION }}/bin/allure generate target/allure-results -o target/allure-report
+      
+      - name: Publish Test Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: test-reports-security
+          path: target/allure-report
+      
+      - name: Publish ZAP Report
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: zap-security-report
+          path: target/zap-security-report.html
+
+  notify:
+    name: Send Notifications
+    needs: [functional-tests, api-tests, security-tests]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+      - uses: actions/checkout@v3
+      
+      - name: Set up JDK 11
+        uses: actions/setup-java@v3
+        with:
+          java-version: '11'
+          distribution: 'adopt'
+      
+      - name: Download Artifacts
+        uses: actions/download-artifact@v3
+        with:
+          path: reports
+      
+      - name: Send Notifications
+        run: |
+          mvn exec:java -Dexec.mainClass="com.securitytests.utils.notification.NotificationSender" -Dexec.args="--subject 'Test Execution Results' --body 'Test execution for ${{ github.repository }} completed. See results at ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}' --priority HIGH"
+        env:
+          NOTIFICATION_EMAIL_RECIPIENTS: ${{ secrets.NOTIFICATION_EMAIL_RECIPIENTS }}
+          NOTIFICATION_SLACK_WEBHOOK: ${{ secrets.NOTIFICATION_SLACK_WEBHOOK }}
+          NOTIFICATION_TEAMS_WEBHOOK: ${{ secrets.NOTIFICATION_TEAMS_WEBHOOK }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USERNAME: ${{ secrets.SMTP_USERNAME }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}

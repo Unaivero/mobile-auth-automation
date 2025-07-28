@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE suite SYSTEM "https://testng.org/testng-1.0.dtd">
+<suite name="Mobile Security Test Suite" parallel="classes" thread-count="2">
+    <!-- Common test configuration parameters -->
+    <parameter name="platformName" value="Android" />
+    <parameter name="deviceName" value="Android Emulator" />
+    
+    <!-- Traditional TestNG Tests -->
+    <test name="Authentication Tests" parallel="methods" thread-count="2">
+        <classes>
+            <class name="com.securitytests.tests.LoginSecurityTest"/>
+            <class name="com.securitytests.tests.PasswordRecoveryTest"/>
+        </classes>
+    </test>
+    
+    <!-- Cucumber BDD Tests -->
+    <test name="BDD Feature Tests">
+        <classes>
+            <class name="com.securitytests.runners.CucumberTestRunner"/>
+        </classes>
+    </test>
+    
+    <listeners>
+        <listener class-name="com.securitytests.utils.TestListener"/>
+        <listener class-name="io.qameta.allure.testng.AllureTestNg"/>
+    </listeners>
+</suite>
